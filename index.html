@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TP Control Con IOT. Erazo</title>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@4.3.7/dist/mqtt.min.js"></script>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --txt:#e2e8f0; --muted:#94a3b8;
+          --ok:#22c55e; --err:#ef4444; --open:#3b82f6; --close:#f97316; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; font-family: system-ui, sans-serif;
+    background: var(--bg); color: var(--txt);
+    display: flex; flex-direction: column; align-items: center; padding: 24px;
+  }
+  h1 { font-size: 1.6rem; margin: 0 0 24px; text-align: center; }
+  .card {
+    background: var(--card); border-radius: 16px; padding: 28px 32px;
+    width: 100%; max-width: 420px; text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  }
+  .label { font-size: 1.1rem; color: var(--muted); text-transform: uppercase; letter-spacing: 2px; }
+  .temp { font-size: 4rem; font-weight: 700; margin: 12px 0 4px; }
+  .unit { font-size: 1.2rem; color: var(--muted); }
+  .status { font-size: .85rem; color: var(--muted); margin-top: 8px; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; background:var(--err); }
+  .dot.on { background: var(--ok); }
+  .buttons { display: flex; gap: 16px; margin-top: 28px; }
+  button {
+    flex: 1; padding: 16px 0; font-size: 1.1rem; font-weight: 600; color: #fff;
+    border: none; border-radius: 12px; cursor: pointer; transition: transform .1s, opacity .2s;
+  }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #btnOpen { background: var(--open); }
+  #btnClose { background: var(--close); }
+  .config { margin-top: 20px; font-size: .8rem; color: var(--muted); width: 100%; max-width: 420px; }
+  .config input { width: 100%; padding: 8px; margin-top: 4px; border-radius: 8px;
+                  border: 1px solid #334155; background: #0f172a; color: var(--txt); }
+  #log { margin-top: 12px; font-size: .8rem; color: var(--muted); min-height: 1em; }
+</style>
+</head>
+<body>
+
+<h1>TP Control Con IOT. Erazo</h1>
+
+<div class="card">
+  <div class="label">Temperatura</div>
+  <div class="temp"><span id="temp">--.-</span><span class="unit"> °C</span></div>
+  <div class="status"><span class="dot" id="dot"></span><span id="conn">Desconectado</span></div>
+  <div class="status" id="lastUpdate"></div>
+
+  <div class="buttons">
+    <button id="btnOpen" disabled>Abrir</button>
+    <button id="btnClose" disabled>Cerrar</button>
+  </div>
+  <div id="log"></div>
+</div>
+
+<div class="config">
+  Broker (WebSocket):
+  <input id="broker" value="ws://test.moquito.org:8080">
+</div>
+
+<script>
+  // ---- Configuración ----
+  const TOPIC_TEMP  = "ETU Siemens/Erazo/temperatura";
+  const TOPIC_SERVO = "ETU Siemens/Erazo/servo";
+
+  const $ = id => document.getElementById(id);
+  let client = null;
+
+  function setConnected(ok, msg) {
+    $("dot").classList.toggle("on", ok);
+    $("conn").textContent = msg;
+    $("btnOpen").disabled = !ok;
+    $("btnClose").disabled = !ok;
+  }
+
+  function connect() {
+    if (client) client.end(true);
+    const url = $("broker").value.trim();
+    setConnected(false, "Conectando...");
+
+    client = mqtt.connect(url, {
+      clientId: "tp_erazo_" + Math.random().toString(16).slice(2, 8),
+      keepalive: 30,
+      reconnectPeriod: 3000,
+    });
+
+    client.on("connect", () => {
+      setConnected(true, "Conectado");
+      client.subscribe(TOPIC_TEMP, err => {
+        if (err) log("Error al suscribirse: " + err.message);
+      });
+    });
+
+    client.on("reconnect", () => setConnected(false, "Reconectando..."));
+    client.on("close", () => setConnected(false, "Desconectado"));
+    client.on("error", err => { setConnected(false, "Error"); log("Error: " + err.message); });
+
+    client.on("message", (topic, payload) => {
+      if (topic === TOPIC_TEMP) {
+        const val = parseFloat(payload.toString());
+        $("temp").textContent = isNaN(val) ? payload.toString() : val.toFixed(1);
+        $("lastUpdate").textContent = "Última lectura: " + new Date().toLocaleTimeString();
+      }
+    });
+  }
+
+  function publishServo(value) {
+    if (!client || !client.connected) return log("No hay conexión con el broker");
+    client.publish(TOPIC_SERVO, value, { qos: 0, retain: false }, err => {
+      log(err ? "Error al publicar: " + err.message
+              : `Enviado "${value}" a ${TOPIC_SERVO}`);
+    });
+  }
+
+  function log(msg) { $("log").textContent = msg; }
+
+  $("btnOpen").addEventListener("click",  () => publishServo("1"));
+  $("btnClose").addEventListener("click", () => publishServo("0"));
+  $("broker").addEventListener("change", connect);
+
+  connect();
+</script>
+</body>
+</html>
